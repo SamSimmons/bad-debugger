@@ -22,16 +22,37 @@ func main() {
   }
   err = cmd.Wait()
   log.Printf("State: %v\n", err)
-  log.Println("Restarting...")
-  err = syscall.PtraceCont(cmd.Process.Pid, 0)
+  wpid := cmd.Process.Pid
+  pgid, err := syscall.Getpgid(cmd.Process.Pid)
   if err != nil {
     log.Panic(err)
   }
-  var ws syscall.WaitStatus
-  _, err = syscall.Wait4(cmd.Process.Pid, &ws, syscall.WALL, nil)
+  err = syscall.PtraceSetOptions(cmd.Process.Pid, syscall.PTRACE_O_TRACECLONE)
   if err != nil {
     log.Fatal(err)
   }
-  log.Printf("Exited: %v\n", ws.Exited())
-  log.Printf("Exit status: %v\n", ws.ExitStatus())
+  err = syscall.PtraceSingleStep(wpid)
+  if err != nil {
+    log.Fatal(err)
+  }
+  steps := 1
+
+  for {
+    var ws syscall.WaitStatus
+    wpid, err = syscall.Wait4(-1*pgid, &ws, syscall.WALL, nil)
+    if wpid == -1 {
+      log.Fatal(err)
+    }
+    if wpid == cmd.Process.Pid && ws.Exited() {
+      break
+    }
+    if !ws.Exited() {
+      err := syscall.PtraceSingleStep(wpid)
+      if err != nil {
+        log.Fatal(err)
+      }
+      steps += 1
+    }
+  }
+  log.Printf("Steps: %d\n", steps)
 }
